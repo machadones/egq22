@@ -17,17 +17,19 @@ local currentTitleColor = Color3.fromRGB(255, 140, 0)
 local savedPosition, panelLoaded, anonimatoEnabled = nil, false, false
 local clickCount, lastClickTime, nextFireTime = 0, 0, 0
 local mouse1Down, ignoreMouse1Release = false, false
-local infiniteAmmoEnabled, noRecoilEnabled, antiAfkEnabled = false, false, false
+local infiniteAmmoEnabled, noRecoilEnabled = false, false
 local nextRecoilTime, nextRecoilReturnTime = 0, 0
 local DISFARCE_PARTS = {"Head", "Torso", "HumanoidRootPart", "Left Arm", "Right Arm", "Left Leg", "Right Leg"}
 local frameCount, lastTime, currentFps, fpsLabel, espUpdateTimer = 0, tick(), 0, nil, 0
 local lastESPUpdate = 0
--- Novas variáveis (map-based)
-local noClipEnabled = false
-local autoInteractEnabled = false
-local walkSpeedValue = 16
-local jumpPowerValue = 50
-local promptCooldowns = {}
+
+-- VARIÁVEIS NOVAS (Silent Aim + Anti-AFK + Hitbox)
+local antiAfkEnabled = false
+local silentAimEnabled, silentAimFov, silentAimPart = false, 150, "Head"
+local hitboxEnabled, hitboxSize = false, 3
+local hitboxOriginalSizes = {}
+local HITBOX_TARGETS = {"Head", "HumanoidRootPart", "Torso", "UpperTorso", "LowerTorso"}
+local hookInstalled = false
 
 local visibilityCache = {}
 local VISIBILITY_CACHE_TIME = 0.2
@@ -60,8 +62,6 @@ elseif mouse_move then
     mouseMoveFunc = function(dx, dy) mouse_move(dx, dy) end
 elseif move_mouse then
     mouseMoveFunc = function(dx, dy) move_mouse(dx, dy) end
-else
-    warn("[AimColor] Nenhuma função de mover mouse encontrada.")
 end
 
 local mouseClickFunc = nil
@@ -86,34 +86,6 @@ elseif game:GetService("VirtualInputManager") then
 end
 
 -- ====================== FUNÇÕES AUXILIARES ======================
-local function createFPSDisplay()
-    if fpsLabel then pcall(function() fpsLabel:Remove() end); fpsLabel = nil end
-    if not showFps then return end
-    fpsLabel = Drawing.new("Text")
-    fpsLabel.Visible = true
-    fpsLabel.Center = false
-    fpsLabel.Outline = false
-    fpsLabel.Font = 2
-    fpsLabel.Size = 16
-    fpsLabel.Color = Color3.fromRGB(255, 140, 0)
-    fpsLabel.Position = Vector2.new(Camera.ViewportSize.X - 60, 15)
-end
-
-local function updateFPS()
-    frameCount = frameCount + 1
-    local currentTime = tick()
-    if currentTime - lastTime >= 1 then
-        currentFps = frameCount
-        frameCount = 0
-        lastTime = currentTime
-        if fpsLabel and showFps then
-            fpsLabel.Color = Color3.fromRGB(255, 140, 0)
-            fpsLabel.Text = ("FPS: %d"):format(currentFps)
-            fpsLabel.Position = Vector2.new(Camera.ViewportSize.X - 60, 15)
-        end
-    end
-end
-
 local function teleportToMouse()
     local mouse = LocalPlayer:GetMouse()
     if mouse and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
@@ -142,11 +114,8 @@ end
 
 local function getTeamColor(player)
     if player.Team then
-        if player.Team.TeamColor then
-            return player.Team.TeamColor.Color
-        elseif player.Team.BrickColor then
-            return player.Team.BrickColor.Color
-        end
+        if player.Team.TeamColor then return player.Team.TeamColor.Color
+        elseif player.Team.BrickColor then return player.Team.BrickColor.Color end
     end
     return Color3.fromRGB(180, 180, 180)
 end
@@ -166,9 +135,7 @@ local function isPlayerAlive(player)
     return humanoid and humanoid.Health > 0 or false
 end
 
-local function passesFilters(player)
-    return true
-end
+local function passesFilters(player) return true end
 
 local function isMouseOverPanel()
     if not MainFrame or not MainFrame.Visible then return false end
@@ -214,15 +181,11 @@ ScreenGui.ResetOnSpawn = false
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
 pcall(function()
-    if syn and syn.protect_gui then
-        syn.protect_gui(ScreenGui)
-    end
+    if syn and syn.protect_gui then syn.protect_gui(ScreenGui) end
     ScreenGui.Parent = game.CoreGui
 end)
 if not ScreenGui.Parent then
-    pcall(function()
-        ScreenGui.Parent = game.Players.LocalPlayer.PlayerGui
-    end)
+    pcall(function() ScreenGui.Parent = game.Players.LocalPlayer.PlayerGui end)
 end
 
 MainFrame = Instance.new("Frame", ScreenGui)
@@ -291,7 +254,6 @@ MinimizeCorner.CornerRadius = UDim.new(0, 6)
 local MinimizeIcon = Instance.new("TextLabel", MinimizeButton)
 MinimizeIcon.Text = "+"
 MinimizeIcon.Size = UDim2.new(1, 0, 1, 0)
-MinimizeIcon.Position = UDim2.new(0, 0, 0, 0)
 MinimizeIcon.BackgroundTransparency = 1
 MinimizeIcon.TextColor3 = Color3.fromRGB(255, 140, 0)
 MinimizeIcon.Font = Enum.Font.GothamBlack
@@ -348,34 +310,25 @@ end)
 UserInputService.InputChanged:Connect(function(input)
     if draggingPanel and input.UserInputType == Enum.UserInputType.MouseMovement then
         local delta = input.Position - dragStartPos
-        MainFrame.Position = UDim2.new(panelStartPos.X.Scale, panelStartPos.X.Offset + delta.X,
-                                        panelStartPos.Y.Scale, panelStartPos.Y.Offset + delta.Y)
+        MainFrame.Position = UDim2.new(panelStartPos.X.Scale, panelStartPos.X.Offset + delta.X, panelStartPos.Y.Scale, panelStartPos.Y.Offset + delta.Y)
         savedPosition = MainFrame.Position
         if ColorMenu and ColorMenu.Visible then
             local buttonPos = ChangeColorButton and ChangeColorButton.AbsolutePosition
-            if buttonPos then
-                ColorMenu.Position = UDim2.new(0, buttonPos.X - 150, 0, buttonPos.Y + 35)
-            end
+            if buttonPos then ColorMenu.Position = UDim2.new(0, buttonPos.X - 150, 0, buttonPos.Y + 35) end
         end
         if KeyMenu and KeyMenu.Visible then
             local buttonPos = ChangeKeyButton and ChangeKeyButton.AbsolutePosition
-            if buttonPos then
-                KeyMenu.Position = UDim2.new(0, buttonPos.X - 150, 0, buttonPos.Y + 35)
-            end
+            if buttonPos then KeyMenu.Position = UDim2.new(0, buttonPos.X - 150, 0, buttonPos.Y + 35) end
         end
         if AimbotKeyMenu and AimbotKeyMenu.Visible then
             local buttonPos = ChangeAimbotKeyButton and ChangeAimbotKeyButton.AbsolutePosition
-            if buttonPos then
-                AimbotKeyMenu.Position = UDim2.new(0, buttonPos.X - 150, 0, buttonPos.Y + 35)
-            end
+            if buttonPos then AimbotKeyMenu.Position = UDim2.new(0, buttonPos.X - 150, 0, buttonPos.Y + 35) end
         end
     end
 end)
 
 UserInputService.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        draggingPanel = false
-    end
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then draggingPanel = false end
 end)
 
 MinimizedFrame = Instance.new("Frame", ScreenGui)
@@ -416,8 +369,7 @@ end)
 UserInputService.InputChanged:Connect(function(input)
     if draggingMinimized and input.UserInputType == Enum.UserInputType.MouseMovement then
         local delta = input.Position - dragStartPosMin
-        MinimizedFrame.Position = UDim2.new(panelStartPosMin.X.Scale, panelStartPosMin.X.Offset + delta.X,
-                                            panelStartPosMin.Y.Scale, panelStartPosMin.Y.Offset + delta.Y)
+        MinimizedFrame.Position = UDim2.new(panelStartPosMin.X.Scale, panelStartPosMin.X.Offset + delta.X, panelStartPosMin.Y.Scale, panelStartPosMin.Y.Offset + delta.Y)
         savedPosition = MinimizedFrame.Position
     end
 end)
@@ -426,9 +378,7 @@ UserInputService.InputEnded:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
         if draggingMinimized then
             local delta = input.Position - dragStartPosMin
-            if math.abs(delta.X) < 5 and math.abs(delta.Y) < 5 then
-                toggleMinimize()
-            end
+            if math.abs(delta.X) < 5 and math.abs(delta.Y) < 5 then toggleMinimize() end
         end
         draggingMinimized = false
     end
@@ -471,19 +421,7 @@ ESPListLayout.FillDirection = Enum.FillDirection.Vertical
 ESPListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 ESPListLayout.VerticalAlignment = Enum.VerticalAlignment.Top
 
--- ExtraScroll (aba Extra agora scrollável)
-local ExtraScroll = Instance.new("ScrollingFrame", ExtraTabFrame)
-ExtraScroll.Size = UDim2.new(1, 0, 1, 0)
-ExtraScroll.Position = UDim2.new(0, 0, 0, 0)
-ExtraScroll.BackgroundTransparency = 1
-ExtraScroll.BorderSizePixel = 0
-ExtraScroll.ScrollBarThickness = 4
-ExtraScroll.ScrollBarImageColor3 = currentTitleColor
-ExtraScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-ExtraScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
-ExtraScroll.ScrollingDirection = Enum.ScrollingDirection.Y
-
-local ExtraListLayout = Instance.new("UIListLayout", ExtraScroll)
+local ExtraListLayout = Instance.new("UIListLayout", ExtraTabFrame)
 ExtraListLayout.Padding = UDim.new(0, 6)
 ExtraListLayout.FillDirection = Enum.FillDirection.Vertical
 ExtraListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
@@ -493,45 +431,29 @@ local AimbotLeftFrame = Instance.new("Frame", AimbotTabFrame)
 AimbotLeftFrame.Size = UDim2.new(0.5, -5, 0, 220)
 AimbotLeftFrame.Position = UDim2.new(0, 0, 0, 0)
 AimbotLeftFrame.BackgroundTransparency = 1
-AimbotLeftFrame.BorderSizePixel = 0
 local AimbotLeftLayout = Instance.new("UIListLayout", AimbotLeftFrame)
 AimbotLeftLayout.Padding = UDim.new(0, 6)
-AimbotLeftLayout.FillDirection = Enum.FillDirection.Vertical
-AimbotLeftLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-AimbotLeftLayout.VerticalAlignment = Enum.VerticalAlignment.Top
 
 local AimbotRightFrame = Instance.new("Frame", AimbotTabFrame)
 AimbotRightFrame.Size = UDim2.new(0.5, -5, 0, 220)
 AimbotRightFrame.Position = UDim2.new(0.5, 5, 0, 0)
 AimbotRightFrame.BackgroundTransparency = 1
-AimbotRightFrame.BorderSizePixel = 0
 local AimbotRightLayout = Instance.new("UIListLayout", AimbotRightFrame)
 AimbotRightLayout.Padding = UDim.new(0, 6)
-AimbotRightLayout.FillDirection = Enum.FillDirection.Vertical
-AimbotRightLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-AimbotRightLayout.VerticalAlignment = Enum.VerticalAlignment.Top
 
 local AimColorLeftFrame = Instance.new("Frame", AimColorTabFrame)
 AimColorLeftFrame.Size = UDim2.new(0.5, -5, 0, 220)
 AimColorLeftFrame.Position = UDim2.new(0, 0, 0, 0)
 AimColorLeftFrame.BackgroundTransparency = 1
-AimColorLeftFrame.BorderSizePixel = 0
 local AimColorLeftLayout = Instance.new("UIListLayout", AimColorLeftFrame)
 AimColorLeftLayout.Padding = UDim.new(0, 6)
-AimColorLeftLayout.FillDirection = Enum.FillDirection.Vertical
-AimColorLeftLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-AimColorLeftLayout.VerticalAlignment = Enum.VerticalAlignment.Top
 
 local AimColorRightFrame = Instance.new("Frame", AimColorTabFrame)
 AimColorRightFrame.Size = UDim2.new(0.5, -5, 0, 220)
 AimColorRightFrame.Position = UDim2.new(0.5, 5, 0, 0)
 AimColorRightFrame.BackgroundTransparency = 1
-AimColorRightFrame.BorderSizePixel = 0
 local AimColorRightLayout = Instance.new("UIListLayout", AimColorRightFrame)
 AimColorRightLayout.Padding = UDim.new(0, 6)
-AimColorRightLayout.FillDirection = Enum.FillDirection.Vertical
-AimColorRightLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-AimColorRightLayout.VerticalAlignment = Enum.VerticalAlignment.Top
 
 -- ====================== PAINÉIS INFERIORES ======================
 local KeyPanel = Instance.new("Frame", MainFrame)
@@ -540,8 +462,6 @@ KeyPanel.Position = UDim2.new(0, 10, 1, -50)
 KeyPanel.BackgroundColor3 = COLORS.SECONDARY
 KeyPanel.BackgroundTransparency = 0.5
 KeyPanel.BorderSizePixel = 0
-KeyPanel.ZIndex = 1
-
 local KeyPanelCorner = Instance.new("UICorner", KeyPanel)
 KeyPanelCorner.CornerRadius = UDim.new(0, 10)
 
@@ -564,7 +484,6 @@ CurrentKeyButton.Text = "Insert"
 CurrentKeyButton.TextColor3 = Color3.new(1, 1, 1)
 CurrentKeyButton.Font = Enum.Font.GothamBlack
 CurrentKeyButton.TextSize = 11
-
 local CurrentKeyCorner = Instance.new("UICorner", CurrentKeyButton)
 CurrentKeyCorner.CornerRadius = UDim.new(0, 6)
 
@@ -577,7 +496,6 @@ ChangeKeyButton.Text = "Mudar"
 ChangeKeyButton.TextColor3 = Color3.new(1, 1, 1)
 ChangeKeyButton.Font = Enum.Font.GothamBlack
 ChangeKeyButton.TextSize = 11
-
 local ChangeKeyCorner = Instance.new("UICorner", ChangeKeyButton)
 ChangeKeyCorner.CornerRadius = UDim.new(0, 6)
 
@@ -587,7 +505,6 @@ AimbotKeyPanel.Position = UDim2.new(0, 10, 1, -50)
 AimbotKeyPanel.BackgroundColor3 = COLORS.SECONDARY
 AimbotKeyPanel.BackgroundTransparency = 0.5
 AimbotKeyPanel.BorderSizePixel = 0
-
 local AimbotKeyPanelCorner = Instance.new("UICorner", AimbotKeyPanel)
 AimbotKeyPanelCorner.CornerRadius = UDim.new(0, 10)
 
@@ -610,7 +527,6 @@ CurrentAimbotKeyButton.Text = "T"
 CurrentAimbotKeyButton.TextColor3 = Color3.new(1, 1, 1)
 CurrentAimbotKeyButton.Font = Enum.Font.GothamBlack
 CurrentAimbotKeyButton.TextSize = 11
-
 local CurrentAimbotKeyCorner = Instance.new("UICorner", CurrentAimbotKeyButton)
 CurrentAimbotKeyCorner.CornerRadius = UDim.new(0, 6)
 
@@ -623,7 +539,6 @@ ChangeAimbotKeyButton.Text = "Mudar"
 ChangeAimbotKeyButton.TextColor3 = Color3.new(1, 1, 1)
 ChangeAimbotKeyButton.Font = Enum.Font.GothamBlack
 ChangeAimbotKeyButton.TextSize = 11
-
 local ChangeAimbotKeyCorner = Instance.new("UICorner", ChangeAimbotKeyButton)
 ChangeAimbotKeyCorner.CornerRadius = UDim.new(0, 6)
 
@@ -633,7 +548,6 @@ ColorPanel.Position = UDim2.new(0, 10, 1, -100)
 ColorPanel.BackgroundColor3 = COLORS.SECONDARY
 ColorPanel.BackgroundTransparency = 0.5
 ColorPanel.BorderSizePixel = 0
-
 local ColorPanelCorner = Instance.new("UICorner", ColorPanel)
 ColorPanelCorner.CornerRadius = UDim.new(0, 10)
 
@@ -654,7 +568,6 @@ CurrentColorButton.BackgroundColor3 = currentTitleColor
 CurrentColorButton.BorderSizePixel = 0
 CurrentColorButton.Text = ""
 CurrentColorButton.AutoButtonColor = false
-
 local CurrentColorCorner = Instance.new("UICorner", CurrentColorButton)
 CurrentColorCorner.CornerRadius = UDim.new(0, 6)
 
@@ -667,7 +580,6 @@ ChangeColorButton.Text = "Mudar"
 ChangeColorButton.TextColor3 = Color3.new(1, 1, 1)
 ChangeColorButton.Font = Enum.Font.GothamBlack
 ChangeColorButton.TextSize = 11
-
 local ChangeColorCorner = Instance.new("UICorner", ChangeColorButton)
 ChangeColorCorner.CornerRadius = UDim.new(0, 6)
 
@@ -740,20 +652,16 @@ KeyMenu.BorderSizePixel = 0
 KeyMenu.BackgroundTransparency = 0.5
 KeyMenu.Visible = false
 KeyMenu.ZIndex = 10
-
 local KeyMenuCorner = Instance.new("UICorner", KeyMenu)
 KeyMenuCorner.CornerRadius = UDim.new(0, 8)
 
 local KeyMenuTitle = Instance.new("TextLabel", KeyMenu)
 KeyMenuTitle.Text = "Pressione uma tecla..."
 KeyMenuTitle.Size = UDim2.new(1, 0, 0, 40)
-KeyMenuTitle.Position = UDim2.new(0, 0, 0, 0)
 KeyMenuTitle.BackgroundColor3 = currentTitleColor
 KeyMenuTitle.TextColor3 = Color3.new(1, 1, 1)
 KeyMenuTitle.Font = Enum.Font.GothamBlack
 KeyMenuTitle.TextSize = 14
-KeyMenuTitle.TextXAlignment = Enum.TextXAlignment.Center
-
 local KeyMenuCorner2 = Instance.new("UICorner", KeyMenuTitle)
 KeyMenuCorner2.CornerRadius = UDim.new(0, 8)
 
@@ -765,7 +673,6 @@ KeyMenuSub.BackgroundTransparency = 1
 KeyMenuSub.TextColor3 = COLORS.TEXT
 KeyMenuSub.Font = Enum.Font.GothamBlack
 KeyMenuSub.TextSize = 12
-KeyMenuSub.TextXAlignment = Enum.TextXAlignment.Center
 
 AimbotKeyMenu = Instance.new("Frame", ScreenGui)
 AimbotKeyMenu.Size = UDim2.new(0, 250, 0, 120)
@@ -774,20 +681,16 @@ AimbotKeyMenu.BorderSizePixel = 0
 AimbotKeyMenu.BackgroundTransparency = 0.5
 AimbotKeyMenu.Visible = false
 AimbotKeyMenu.ZIndex = 10
-
 local AimbotKeyMenuCorner = Instance.new("UICorner", AimbotKeyMenu)
 AimbotKeyMenuCorner.CornerRadius = UDim.new(0, 8)
 
 local AimbotKeyMenuTitle = Instance.new("TextLabel", AimbotKeyMenu)
 AimbotKeyMenuTitle.Text = "Pressione uma tecla..."
 AimbotKeyMenuTitle.Size = UDim2.new(1, 0, 0, 40)
-AimbotKeyMenuTitle.Position = UDim2.new(0, 0, 0, 0)
 AimbotKeyMenuTitle.BackgroundColor3 = currentTitleColor
 AimbotKeyMenuTitle.TextColor3 = Color3.new(1, 1, 1)
 AimbotKeyMenuTitle.Font = Enum.Font.GothamBlack
 AimbotKeyMenuTitle.TextSize = 14
-AimbotKeyMenuTitle.TextXAlignment = Enum.TextXAlignment.Center
-
 local AimbotKeyMenuCorner2 = Instance.new("UICorner", AimbotKeyMenuTitle)
 AimbotKeyMenuCorner2.CornerRadius = UDim.new(0, 8)
 
@@ -799,7 +702,6 @@ AimbotKeyMenuSub.BackgroundTransparency = 1
 AimbotKeyMenuSub.TextColor3 = COLORS.TEXT
 AimbotKeyMenuSub.Font = Enum.Font.GothamBlack
 AimbotKeyMenuSub.TextSize = 12
-AimbotKeyMenuSub.TextXAlignment = Enum.TextXAlignment.Center
 
 local waitingForKey = false
 local keyConnection = nil
@@ -811,9 +713,7 @@ local function closeKeyMenu()
 end
 
 ChangeKeyButton.MouseButton1Click:Connect(function()
-    if KeyMenu.Visible then
-        closeKeyMenu()
-    else
+    if KeyMenu.Visible then closeKeyMenu() else
         KeyMenu.Visible = true
         if keyConnection then keyConnection:Disconnect() end
         waitingForKey = true
@@ -844,9 +744,7 @@ local function closeAimbotKeyMenu()
 end
 
 ChangeAimbotKeyButton.MouseButton1Click:Connect(function()
-    if AimbotKeyMenu.Visible then
-        closeAimbotKeyMenu()
-    else
+    if AimbotKeyMenu.Visible then closeAimbotKeyMenu() else
         AimbotKeyMenu.Visible = true
         if aimbotKeyConnection then aimbotKeyConnection:Disconnect() end
         waitingForAimbotKey = true
@@ -894,9 +792,7 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 end)
 
 UserInputService.InputEnded:Connect(function(input, gameProcessed)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 and not ignoreMouse1Release then
-        mouse1Down = false
-    end
+    if input.UserInputType == Enum.UserInputType.MouseButton1 and not ignoreMouse1Release then mouse1Down = false end
 end)
 
 -- ====================== SEÇÕES E ELEMENTOS ======================
@@ -920,12 +816,8 @@ local function updateAllDynamicColors(color)
     if colorMenuTitle then colorMenuTitle.BackgroundColor3 = color end
     if KeyMenuTitle then KeyMenuTitle.BackgroundColor3 = color end
     if AimbotKeyMenuTitle then AimbotKeyMenuTitle.BackgroundColor3 = color end
-    for _, button in pairs(selectorButtons) do
-        pcall(function() button.BackgroundColor3 = color end)
-    end
-    for _, sliderFill in pairs(sliderFills) do
-        pcall(function() sliderFill.BackgroundColor3 = color end)
-    end
+    for _, button in pairs(selectorButtons) do pcall(function() button.BackgroundColor3 = color end) end
+    for _, sliderFill in pairs(sliderFills) do pcall(function() sliderFill.BackgroundColor3 = color end) end
     if fovCircle then pcall(function() fovCircle.Color = color end) end
     if aimColorFovCircle then pcall(function() aimColorFovCircle.Color = color end) end
 end
@@ -954,7 +846,6 @@ ColorMenu.BorderSizePixel = 0
 ColorMenu.BackgroundTransparency = 0.5
 ColorMenu.Visible = false
 ColorMenu.ZIndex = 10
-
 local ColorMenuCorner = Instance.new("UICorner", ColorMenu)
 ColorMenuCorner.CornerRadius = UDim.new(0, 8)
 
@@ -965,8 +856,6 @@ colorMenuTitle.BackgroundColor3 = currentTitleColor
 colorMenuTitle.TextColor3 = Color3.new(1, 1, 1)
 colorMenuTitle.Font = Enum.Font.GothamBlack
 colorMenuTitle.TextSize = 14
-colorMenuTitle.TextXAlignment = Enum.TextXAlignment.Center
-
 local ColorMenuCorner2 = Instance.new("UICorner", colorMenuTitle)
 ColorMenuCorner2.CornerRadius = UDim.new(0, 8)
 
@@ -976,11 +865,9 @@ ColorList.Position = UDim2.new(0, 5, 0, 35)
 ColorList.BackgroundTransparency = 1
 ColorList.BorderSizePixel = 0
 ColorList.ScrollBarThickness = 4
-ColorList.ScrollingEnabled = true
 
 local ColorListLayout = Instance.new("UIListLayout", ColorList)
 ColorListLayout.Padding = UDim.new(0, 5)
-ColorListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 
 for i, colorData in ipairs(TITLE_COLORS) do
     local colorButton = Instance.new("TextButton", ColorList)
@@ -1079,7 +966,6 @@ local function createSlider(parent, name, min, max, default, onChanged)
     table.insert(sliderFills, sliderFill)
     local sliderFillCorner = Instance.new("UICorner", sliderFill)
     sliderFillCorner.CornerRadius = UDim.new(0, 3)
-    local currentValue = default
     local mouseDown = false
     local inputConn = nil
     local endConn = nil
@@ -1087,7 +973,6 @@ local function createSlider(parent, name, min, max, default, onChanged)
     local function updateSlider(input)
         local pos = math.clamp((input.Position.X - sliderBg.AbsolutePosition.X) / sliderBg.AbsoluteSize.X, 0, 1)
         local value = math.floor(min + (max - min) * pos)
-        currentValue = value
         sliderFill.Size = UDim2.new(pos, 0, 1, 0)
         label.Text = name .. ": " .. value
         onChanged(value)
@@ -1100,9 +985,7 @@ local function createSlider(parent, name, min, max, default, onChanged)
             if inputConn then inputConn:Disconnect() end
             if endConn then endConn:Disconnect() end
             inputConn = UserInputService.InputChanged:Connect(function(input)
-                if mouseDown and input.UserInputType == Enum.UserInputType.MouseMovement then
-                    updateSlider(input)
-                end
+                if mouseDown and input.UserInputType == Enum.UserInputType.MouseMovement then updateSlider(input) end
             end)
             endConn = UserInputService.InputEnded:Connect(function(input)
                 if input.UserInputType == Enum.UserInputType.MouseButton1 then
@@ -1117,373 +1000,12 @@ local function createSlider(parent, name, min, max, default, onChanged)
     return sliderContainer
 end
 
--- ====================== ESP / GLOW / LIFE ======================
-local function cleanupLifeESP(player)
-    local data = lifeObjects[player]
-    if data then
-        if data.billboard then pcall(function() data.billboard:Destroy() end) end
-        if data.healthConnection then pcall(function() data.healthConnection:Disconnect() end) end
-        if data.deathConnection then pcall(function() data.deathConnection:Disconnect() end) end
-        if data.waitingConn then pcall(function() data.waitingConn:Disconnect() end) end
-        if data.characterConn then pcall(function() data.characterConn:Disconnect() end) end
-        if data.cameraConnection then pcall(function() data.cameraConnection:Disconnect() end) end
-        lifeObjects[player] = nil
-    end
-end
-
-local function updateLifeVisual(player)
-    local data = lifeObjects[player]
-    if not data or not data.billboard or not data.humanoid or not data.rootPart then return end
-    local humanoid = data.humanoid
-    local rootPart = data.rootPart
-    if not humanoid.Parent or not rootPart.Parent then return end
-    local health = humanoid.Health
-    local maxHealth = humanoid.MaxHealth
-    local percent = math.max(0, math.min(1, health / maxHealth))
-    local distance = (Camera.CFrame.Position - rootPart.Position).Magnitude
-    local fontSize = getLifeFontSizeByDistance(distance)
-    local scale = fontSize / 18
-    data.billboard.Size = UDim2.new(0, 60 * scale, 0, 22 * scale)
-    data.healthText.TextSize = fontSize
-    data.healthText.Text = string.format("%.0f", health)
-    data.healthText.TextColor3 = Color3.fromRGB(0, 255, 0)
-    if percent > 0.6 then
-        data.healthFill.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
-    elseif percent > 0.3 then
-        data.healthFill.BackgroundColor3 = Color3.fromRGB(255, 200, 0)
-    else
-        data.healthFill.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
-    end
-    data.healthFill.Size = UDim2.new(percent, 0, 1, 0)
-end
-
-local function updateLifeESP(player)
-    cleanupLifeESP(player)
-    if not espEnabled or not espLifeEnabled or player == LocalPlayer then return end
-    local character = player.Character
-    if not character or not character.Parent then
-        local charConn = player.CharacterAdded:Connect(function()
-            charConn:Disconnect()
-            task.wait(0.3)
-            updateLifeESP(player)
-        end)
-        lifeObjects[player] = {waitingConn = charConn}
-        return
-    end
-    local humanoid = character:FindFirstChildOfClass("Humanoid")
-    local rootPart = character:FindFirstChild("HumanoidRootPart")
-    if not humanoid or not rootPart then return end
-
-    local billboard = Instance.new("BillboardGui")
-    billboard.Size = UDim2.new(0, 60, 0, 22)
-    billboard.StudsOffset = Vector3.new(0, -3.5, 0)
-    billboard.AlwaysOnTop = true
-    billboard.Parent = rootPart
-
-    local mainFrame = Instance.new("Frame", billboard)
-    mainFrame.Size = UDim2.new(1, 0, 1, 0)
-    mainFrame.BackgroundTransparency = 0.85
-    mainFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-    local mainCorner = Instance.new("UICorner", mainFrame)
-    mainCorner.CornerRadius = UDim.new(1, 0)
-
-    local healthText = Instance.new("TextLabel", mainFrame)
-    healthText.Size = UDim2.new(1, 0, 0.8, 0)
-    healthText.Position = UDim2.new(0, 0, 0.1, 0)
-    healthText.BackgroundTransparency = 1
-    healthText.TextColor3 = Color3.fromRGB(0, 255, 0)
-    healthText.TextSize = 16
-    healthText.Font = Enum.Font.GothamBlack
-    healthText.TextXAlignment = Enum.TextXAlignment.Center
-    healthText.TextYAlignment = Enum.TextYAlignment.Center
-
-    local healthBar = Instance.new("Frame", mainFrame)
-    healthBar.Size = UDim2.new(1, -8, 0, 2)
-    healthBar.Position = UDim2.new(0, 4, 1, -4)
-    healthBar.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-    healthBar.BorderSizePixel = 0
-    local healthBarCorner = Instance.new("UICorner", healthBar)
-    healthBarCorner.CornerRadius = UDim.new(1, 0)
-
-    local healthFill = Instance.new("Frame", healthBar)
-    healthFill.Size = UDim2.new(1, 0, 1, 0)
-    healthFill.BackgroundColor3 = COLORS.HEART
-    healthFill.BorderSizePixel = 0
-    local healthFillCorner = Instance.new("UICorner", healthFill)
-    healthFillCorner.CornerRadius = UDim.new(1, 0)
-
-    local healthConnection = humanoid.HealthChanged:Connect(function()
-        updateLifeVisual(player)
-    end)
-    local deathConn = humanoid.Died:Connect(function()
-        cleanupLifeESP(player)
-        local respawnConn = player.CharacterAdded:Connect(function()
-            respawnConn:Disconnect()
-            task.wait(0.3)
-            updateLifeESP(player)
-        end)
-    end)
-    local characterConn = player.CharacterAdded:Connect(function()
-        task.wait(0.3)
-        updateLifeESP(player)
-    end)
-
-    lifeObjects[player] = {
-        billboard = billboard,
-        healthText = healthText,
-        healthFill = healthFill,
-        humanoid = humanoid,
-        rootPart = rootPart,
-        healthConnection = healthConnection,
-        deathConnection = deathConn,
-        characterConn = characterConn
-    }
-
-    local shouldShow = passesFilters(player) and (not teamCheck or player.Team ~= LocalPlayer.Team)
-    billboard.Enabled = shouldShow
-    updateLifeVisual(player)
-end
-
-local function updateAllLifeESP()
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer then
-            updateLifeESP(player)
-        end
-    end
-end
-
-local function clearAllLifeESP()
-    for player, _ in pairs(lifeObjects) do cleanupLifeESP(player) end
-    lifeObjects = {}
-end
-
-local function updateGlowForPlayer(player)
-    if not espGlowEnabled or not espEnabled then
-        if glowObjects[player] then
-            if glowObjects[player].highlight then pcall(function() glowObjects[player].highlight:Destroy() end) end
-            glowObjects[player] = nil
-        end
-        return
-    end
-    if player == LocalPlayer then return end
-    local character = player.Character
-    if not character then
-        if glowObjects[player] then
-            if glowObjects[player].highlight then pcall(function() glowObjects[player].highlight:Destroy() end) end
-            glowObjects[player] = nil
-        end
-        return
-    end
-    if glowObjects[player] and glowObjects[player].character ~= character then
-        if glowObjects[player].highlight then pcall(function() glowObjects[player].highlight:Destroy() end) end
-        glowObjects[player] = nil
-    end
-    if not glowObjects[player] then
-        local teamColor = getTeamColor(player)
-        local highlight = Instance.new("Highlight")
-        highlight.FillColor = teamColor
-        highlight.OutlineColor = teamColor
-        highlight.FillTransparency = 0.5
-        highlight.OutlineTransparency = 0.3
-        highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-        highlight.Adornee = character
-        highlight.Parent = game.CoreGui
-        glowObjects[player] = {highlight = highlight, character = character}
-    else
-        local currentTeamColor = getTeamColor(player)
-        if glowObjects[player].highlight.FillColor ~= currentTeamColor then
-            glowObjects[player].highlight.FillColor = currentTeamColor
-            glowObjects[player].highlight.OutlineColor = currentTeamColor
-        end
-    end
-    local shouldShow = passesFilters(player) and (not teamCheck or player.Team ~= LocalPlayer.Team) and isPlayerAlive(player)
-    if glowObjects[player] and glowObjects[player].highlight then
-        glowObjects[player].highlight.Enabled = shouldShow
-    end
-end
-
-local function clearAllGlow()
-    for player, data in pairs(glowObjects) do
-        if data.highlight then pcall(function() data.highlight:Destroy() end) end
-    end
-    glowObjects = {}
-end
-
-fovCircle = Drawing.new("Circle")
-fovCircle.Visible = showFov
-fovCircle.Thickness = 2
-fovCircle.Radius = fovRadius
-fovCircle.Transparency = 1
-fovCircle.Color = currentTitleColor
-fovCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-
-aimColorFovCircle = Drawing.new("Circle")
-aimColorFovCircle.Visible = false
-aimColorFovCircle.Thickness = 2
-aimColorFovCircle.Radius = aimColorFovRadius
-aimColorFovCircle.Transparency = 1
-aimColorFovCircle.Color = currentTitleColor
-aimColorFovCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-
-aimbotTargetFrame = Instance.new("Frame", ScreenGui)
-aimbotTargetFrame.Size = UDim2.new(0, 200, 0, 40)
-aimbotTargetFrame.Position = UDim2.new(0.5, 0, 0, 40)
-aimbotTargetFrame.AnchorPoint = Vector2.new(0.5, 0.5)
-aimbotTargetFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-aimbotTargetFrame.BackgroundTransparency = 0.5
-aimbotTargetFrame.BorderSizePixel = 0
-aimbotTargetFrame.Visible = false
-aimbotTargetFrame.ZIndex = 50
-
-local aimbotTargetCorner = Instance.new("UICorner", aimbotTargetFrame)
-aimbotTargetCorner.CornerRadius = UDim.new(0, 12)
-
-aimbotTargetLabel = Instance.new("TextLabel", aimbotTargetFrame)
-aimbotTargetLabel.Size = UDim2.new(1, 0, 1, 0)
-aimbotTargetLabel.Position = UDim2.new(0, 0, 0, 0)
-aimbotTargetLabel.BackgroundTransparency = 1
-aimbotTargetLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-aimbotTargetLabel.Font = Enum.Font.GothamBlack
-aimbotTargetLabel.TextSize = 18
-aimbotTargetLabel.TextXAlignment = Enum.TextXAlignment.Center
-aimbotTargetLabel.TextYAlignment = Enum.TextYAlignment.Center
-aimbotTargetLabel.Text = ""
-
--- ====================== NOVO ESP COM BILLBOARDGUI ======================
-local function createESP(player)
-    if player == LocalPlayer or espBillboardObjects[player] then return end
-    local head = player.Character and player.Character:FindFirstChild("Head")
-    if not head then return end
-
-    local billboard = Instance.new("BillboardGui")
-    billboard.Name = "ESP"
-    billboard.Size = UDim2.new(0, 200, 0, 50)
-    billboard.StudsOffset = Vector3.new(0, 1.5, 0)
-    billboard.AlwaysOnTop = true
-    billboard.MaxDistance = 1000
-    billboard.Parent = head
-
-    local nickLabel = Instance.new("TextLabel", billboard)
-    nickLabel.Size = UDim2.new(1, 0, 0.5, 0)
-    nickLabel.Position = UDim2.new(0, 0, 0, 0)
-    nickLabel.BackgroundTransparency = 1
-    nickLabel.Text = player.Name
-    nickLabel.TextColor3 = getTeamColor(player)
-    nickLabel.Font = Enum.Font.GothamBlack
-    nickLabel.TextSize = 14
-    nickLabel.TextStrokeTransparency = 0.5
-    nickLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
-    nickLabel.Visible = espNicksEnabled
-
-    local distanceLabel = Instance.new("TextLabel", billboard)
-    distanceLabel.Size = UDim2.new(1, 0, 0.5, 0)
-    distanceLabel.Position = UDim2.new(0, 0, 0.5, 0)
-    distanceLabel.BackgroundTransparency = 1
-    distanceLabel.Text = ""
-    distanceLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-    distanceLabel.Font = Enum.Font.GothamBlack
-    distanceLabel.TextSize = 12
-    distanceLabel.TextStrokeTransparency = 0.5
-    distanceLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
-
-    espBillboardObjects[player] = {
-        gui = billboard,
-        nickLabel = nickLabel,
-        distanceLabel = distanceLabel
-    }
-end
-
-local function removeESP(player)
-    local data = espBillboardObjects[player]
-    if data then
-        pcall(function() data.gui:Destroy() end)
-        espBillboardObjects[player] = nil
-    end
-end
-
-local function clearAllESP()
-    for player, data in pairs(espBillboardObjects) do
-        pcall(function() data.gui:Destroy() end)
-    end
-    espBillboardObjects = {}
-end
-
-local function updateESPTexts()
-    if not espEnabled then return end
-    for player, data in pairs(espBillboardObjects) do
-        local passes = passesFilters(player)
-        local teamOk = not teamCheck or player.Team ~= LocalPlayer.Team
-        local show = passes and teamOk and isPlayerAlive(player)
-        data.gui.Enabled = show
-        if show then
-            local head = player.Character and player.Character:FindFirstChild("Head")
-            if head then
-                local distance = (Camera.CFrame.Position - head.Position).Magnitude
-                data.distanceLabel.Text = espDistanceEnabled and string.format("%.0fm", distance) or ""
-                data.nickLabel.Visible = espNicksEnabled
-                data.distanceLabel.Visible = espDistanceEnabled
-                local fontSize = getFontSizeByDistance(distance)
-                data.nickLabel.TextSize = fontSize
-                data.distanceLabel.TextSize = math.max(8, fontSize - 2)
-                data.nickLabel.TextColor3 = getTeamColor(player)
-            end
-        end
-    end
-end
-
-local function updateAllESP()
-    if not espEnabled then return end
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player == LocalPlayer then continue end
-        if not espBillboardObjects[player] then
-            createESP(player)
-        end
-        if espGlowEnabled then updateGlowForPlayer(player) end
-        if espLifeEnabled then
-            if not lifeObjects[player] and player.Character then
-                updateLifeESP(player)
-            end
-            if lifeObjects[player] and lifeObjects[player].billboard then
-                lifeObjects[player].billboard.Enabled = passesFilters(player) and (not teamCheck or player.Team ~= LocalPlayer.Team) and isPlayerAlive(player)
-                updateLifeVisual(player)
-            end
-        end
-    end
-    for player, _ in pairs(espBillboardObjects) do
-        if not Players:GetPlayerFromCharacter(player.Character) and not Players:GetPlayers()[player] then
-            removeESP(player)
-        end
-    end
-end
-
-local function updateAllGlows()
-    if not espGlowEnabled then return end
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer then updateGlowForPlayer(player) end
-    end
-end
-
-local function recreateAllESP()
-    clearAllESP()
-    clearAllGlow()
-    clearAllLifeESP()
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer then
-            createESP(player)
-            updateGlowForPlayer(player)
-            updateLifeESP(player)
-        end
-    end
-end
-
 -- ====================== FUNÇÕES DE VISIBILIDADE E ALVO ======================
 local function isVisible(part)
     if not wallCheck then return true end
     local now = tick()
     local cached = visibilityCache[part]
-    if cached and (now - cached.time) < VISIBILITY_CACHE_TIME then
-        return cached.result
-    end
+    if cached and (now - cached.time) < VISIBILITY_CACHE_TIME then return cached.result end
     local origin = Camera.CFrame.Position
     local direction = (part.Position - origin)
     local raycastParams = RaycastParams.new()
@@ -1491,9 +1013,7 @@ local function isVisible(part)
     raycastParams.FilterDescendantsInstances = {LocalPlayer.Character}
     local raycastResult = Workspace:Raycast(origin, direction.Unit * math.min(direction.Magnitude, 1000), raycastParams)
     local result = false
-    if raycastResult then
-        result = raycastResult.Instance:IsDescendantOf(part.Parent)
-    end
+    if raycastResult then result = raycastResult.Instance:IsDescendantOf(part.Parent) end
     visibilityCache[part] = {time = now, result = result}
     return result
 end
@@ -1574,6 +1094,467 @@ local function moveMouseTowardsPart(part, strength, prediction)
     mouseMoveFunc(deltaX * strength, deltaY * strength)
 end
 
+-- ====================== HITBOX EXPANDER (BYPASS) ======================
+local function _isHitboxPart(part)
+    if not part or not part:IsA("BasePart") then return false end
+    local parent = part.Parent
+    if not parent or not parent:FindFirstChildOfClass("Humanoid") then return false end
+    for _, n in ipairs(HITBOX_TARGETS) do
+        if part.Name == n then return true end
+    end
+    return false
+end
+
+local function _expandPlayer(player)
+    if player == LocalPlayer then return end
+    local char = player.Character
+    if not char then return end
+    for _, name in ipairs(HITBOX_TARGETS) do
+        local part = char:FindFirstChild(name)
+        if part and part:IsA("BasePart") then
+            if not hitboxOriginalSizes[part] then
+                hitboxOriginalSizes[part] = part.Size 
+            end
+            local target = hitboxOriginalSizes[part] * hitboxSize
+            pcall(function() rawset(part, "Size", target) end)
+            pcall(function() part.Size = target end)
+        end
+    end
+end
+
+local function _restoreHitboxes()
+    for part, orig in pairs(hitboxOriginalSizes) do
+        pcall(function()
+            if part and part.Parent then
+                pcall(function() rawset(part, "Size", orig) end)
+                pcall(function() part.Size = orig end)
+            end
+        end)
+    end
+    hitboxOriginalSizes = {}
+end
+
+local function refreshHitboxes()
+    if not hitboxEnabled then _restoreHitboxes(); return end
+    for part, _ in pairs(hitboxOriginalSizes) do
+        if not part.Parent then hitboxOriginalSizes[part] = nil end
+    end
+    for _, player in ipairs(Players:GetPlayers()) do
+        _expandPlayer(player)
+    end
+end
+
+-- ====================== SILENT AIM ======================
+local function getClosestSilentTarget()
+    local closestPart, closestPlayer = nil, nil
+    local shortestDist = silentAimFov
+    local mousePos = UserInputService:GetMouseLocation()
+    local center = Vector2.new(mousePos.X, mousePos.Y)
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character and isPlayerAlive(player) then
+            if not (teamCheck and player.Team == LocalPlayer.Team) then
+                local part = player.Character:FindFirstChild(silentAimPart)
+                if part then
+                    local pos, onScreen = Camera:WorldToViewportPoint(part.Position)
+                    if onScreen then
+                        local dist = (Vector2.new(pos.X, pos.Y) - center).Magnitude
+                        if dist < shortestDist then
+                            if not wallCheck or isVisible(part) then
+                                shortestDist = dist
+                                closestPart = part
+                                closestPlayer = player
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return closestPart, closestPlayer
+end
+
+-- ====================== HOOK UNIFICADO ======================
+local function installHooks()
+    if hookInstalled then return end
+    if not (hookmetamethod and getnamecallmethod and getrawmetatable and newcclosure) then
+        warn("[Blackhole] Executor sem hookmetamethod.")
+        return
+    end
+
+    local mt = getrawmetatable(game)
+    local oldIndex = mt.__index
+    local oldNamecall = mt.__namecall
+    setreadonly(mt, false)
+
+    mt.__index = newcclosure(function(self, key)
+        if key == "Size" and hitboxEnabled and hitboxOriginalSizes[self] then
+            return hitboxOriginalSizes[self]
+        end
+        if key == "GetExtentsSize" and hitboxEnabled and hitboxOriginalSizes[self] then
+            return function() return hitboxOriginalSizes[self] end
+        end
+        return oldIndex(self, key)
+    end)
+
+    mt.__namecall = newcclosure(function(self, ...)
+        local method = getnamecallmethod()
+        
+        if silentAimEnabled and (method == "FireServer" or method == "InvokeServer") and not isMouseOverPanel() then
+            local remoteName = self.Name:lower()
+            if remoteName == "damage" or remoteName == "fire" or remoteName == "hit" or remoteName == "combat" then
+                local targetPart, targetPlayer = getClosestSilentTarget()
+                local args = {...}
+                if targetPart and targetPlayer then
+                    for i, arg in ipairs(args) do
+                        if typeof(arg) == "Instance" then
+                            if arg:IsA("Player") then args[i] = targetPlayer
+                            elseif arg:IsA("BasePart") then args[i] = targetPart end
+                        end
+                    end
+                    return oldNamecall(self, unpack(args))
+                end
+            end
+        end
+        
+        return oldNamecall(self, ...)
+    end)
+
+    setreadonly(mt, true)
+    hookInstalled = true
+    print("[Blackhole] Proteções (Hook) instaladas.")
+end
+
+-- ====================== ANTI-AFK ======================
+task.spawn(function()
+    while true do
+        task.wait(27 + math.random() * 6)
+        if antiAfkEnabled then
+            local ch = LocalPlayer.Character
+            local h = ch and ch:FindFirstChildOfClass("Humanoid")
+            if h and h.Health > 0 and h.JumpPower > 0 then h.Jump = true end
+        end
+    end
+end)
+
+-- ====================== ESP / GLOW / LIFE ======================
+local function cleanupLifeESP(player)
+    local data = lifeObjects[player]
+    if data then
+        if data.billboard then pcall(function() data.billboard:Destroy() end) end
+        if data.healthConnection then pcall(function() data.healthConnection:Disconnect() end) end
+        if data.deathConnection then pcall(function() data.deathConnection:Disconnect() end) end
+        if data.waitingConn then pcall(function() data.waitingConn:Disconnect() end) end
+        if data.characterConn then pcall(function() data.characterConn:Disconnect() end) end
+        if data.cameraConnection then pcall(function() data.cameraConnection:Disconnect() end) end
+        lifeObjects[player] = nil
+    end
+end
+
+local function updateLifeVisual(player)
+    local data = lifeObjects[player]
+    if not data or not data.billboard or not data.humanoid or not data.rootPart then return end
+    local humanoid, rootPart = data.humanoid, data.rootPart
+    if not humanoid.Parent or not rootPart.Parent then return end
+    local health, maxHealth = humanoid.Health, humanoid.MaxHealth
+    local percent = math.max(0, math.min(1, health / maxHealth))
+    local distance = (Camera.CFrame.Position - rootPart.Position).Magnitude
+    local fontSize = getLifeFontSizeByDistance(distance)
+    local scale = fontSize / 18
+    data.billboard.Size = UDim2.new(0, 60 * scale, 0, 22 * scale)
+    data.healthText.TextSize = fontSize
+    data.healthText.Text = string.format("%.0f", health)
+    data.healthText.TextColor3 = Color3.fromRGB(0, 255, 0)
+    if percent > 0.6 then data.healthFill.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
+    elseif percent > 0.3 then data.healthFill.BackgroundColor3 = Color3.fromRGB(255, 200, 0)
+    else data.healthFill.BackgroundColor3 = Color3.fromRGB(255, 0, 0) end
+    data.healthFill.Size = UDim2.new(percent, 0, 1, 0)
+end
+
+local function updateLifeESP(player)
+    cleanupLifeESP(player)
+    if not espEnabled or not espLifeEnabled or player == LocalPlayer then return end
+    local character = player.Character
+    if not character or not character.Parent then
+        local charConn = player.CharacterAdded:Connect(function()
+            charConn:Disconnect()
+            task.wait(0.3)
+            updateLifeESP(player)
+        end)
+        lifeObjects[player] = {waitingConn = charConn}
+        return
+    end
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if not humanoid or not rootPart then return end
+
+    local billboard = Instance.new("BillboardGui")
+    billboard.Size = UDim2.new(0, 60, 0, 22)
+    billboard.StudsOffset = Vector3.new(0, -3.5, 0)
+    billboard.AlwaysOnTop = true
+    billboard.Parent = rootPart
+
+    local mainFrame = Instance.new("Frame", billboard)
+    mainFrame.Size = UDim2.new(1, 0, 1, 0)
+    mainFrame.BackgroundTransparency = 0.85
+    mainFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    local mainCorner = Instance.new("UICorner", mainFrame)
+    mainCorner.CornerRadius = UDim.new(1, 0)
+
+    local healthText = Instance.new("TextLabel", mainFrame)
+    healthText.Size = UDim2.new(1, 0, 0.8, 0)
+    healthText.Position = UDim2.new(0, 0, 0.1, 0)
+    healthText.BackgroundTransparency = 1
+    healthText.TextColor3 = Color3.fromRGB(0, 255, 0)
+    healthText.TextSize = 16
+    healthText.Font = Enum.Font.GothamBlack
+
+    local healthBar = Instance.new("Frame", mainFrame)
+    healthBar.Size = UDim2.new(1, -8, 0, 2)
+    healthBar.Position = UDim2.new(0, 4, 1, -4)
+    healthBar.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    healthBar.BorderSizePixel = 0
+    local healthBarCorner = Instance.new("UICorner", healthBar)
+    healthBarCorner.CornerRadius = UDim.new(1, 0)
+
+    local healthFill = Instance.new("Frame", healthBar)
+    healthFill.Size = UDim2.new(1, 0, 1, 0)
+    healthFill.BackgroundColor3 = COLORS.HEART
+    healthFill.BorderSizePixel = 0
+    local healthFillCorner = Instance.new("UICorner", healthFill)
+    healthFillCorner.CornerRadius = UDim.new(1, 0)
+
+    local healthConnection = humanoid.HealthChanged:Connect(function() updateLifeVisual(player) end)
+    local deathConn = humanoid.Died:Connect(function()
+        cleanupLifeESP(player)
+        local respawnConn = player.CharacterAdded:Connect(function()
+            respawnConn:Disconnect()
+            task.wait(0.3)
+            updateLifeESP(player)
+        end)
+    end)
+    local characterConn = player.CharacterAdded:Connect(function()
+        task.wait(0.3)
+        updateLifeESP(player)
+    end)
+
+    lifeObjects[player] = {
+        billboard = billboard, healthText = healthText, healthFill = healthFill,
+        humanoid = humanoid, rootPart = rootPart, healthConnection = healthConnection,
+        deathConnection = deathConn, characterConn = characterConn
+    }
+
+    local shouldShow = passesFilters(player) and (not teamCheck or player.Team ~= LocalPlayer.Team)
+    billboard.Enabled = shouldShow
+    updateLifeVisual(player)
+end
+
+local function updateAllLifeESP()
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then updateLifeESP(player) end
+    end
+end
+
+local function clearAllLifeESP()
+    for player, _ in pairs(lifeObjects) do cleanupLifeESP(player) end
+    lifeObjects = {}
+end
+
+local function updateGlowForPlayer(player)
+    if not espGlowEnabled or not espEnabled then
+        if glowObjects[player] then
+            if glowObjects[player].highlight then pcall(function() glowObjects[player].highlight:Destroy() end) end
+            glowObjects[player] = nil
+        end
+        return
+    end
+    if player == LocalPlayer then return end
+    local character = player.Character
+    if not character then
+        if glowObjects[player] then
+            if glowObjects[player].highlight then pcall(function() glowObjects[player].highlight:Destroy() end) end
+            glowObjects[player] = nil
+        end
+        return
+    end
+    if glowObjects[player] and glowObjects[player].character ~= character then
+        if glowObjects[player].highlight then pcall(function() glowObjects[player].highlight:Destroy() end) end
+        glowObjects[player] = nil
+    end
+    if not glowObjects[player] then
+        local teamColor = getTeamColor(player)
+        local highlight = Instance.new("Highlight")
+        highlight.FillColor = teamColor
+        highlight.OutlineColor = teamColor
+        highlight.FillTransparency = 0.5
+        highlight.OutlineTransparency = 0.3
+        highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        highlight.Adornee = character
+        highlight.Parent = game.CoreGui
+        glowObjects[player] = {highlight = highlight, character = character}
+    else
+        local currentTeamColor = getTeamColor(player)
+        if glowObjects[player].highlight.FillColor ~= currentTeamColor then
+            glowObjects[player].highlight.FillColor = currentTeamColor
+            glowObjects[player].highlight.OutlineColor = currentTeamColor
+        end
+    end
+    local shouldShow = passesFilters(player) and (not teamCheck or player.Team ~= LocalPlayer.Team) and isPlayerAlive(player)
+    if glowObjects[player] and glowObjects[player].highlight then glowObjects[player].highlight.Enabled = shouldShow end
+end
+
+local function clearAllGlow()
+    for player, data in pairs(glowObjects) do
+        if data.highlight then pcall(function() data.highlight:Destroy() end) end
+    end
+    glowObjects = {}
+end
+
+fovCircle = Drawing.new("Circle")
+fovCircle.Visible = showFov
+fovCircle.Thickness = 2
+fovCircle.Radius = fovRadius
+fovCircle.Transparency = 1
+fovCircle.Color = currentTitleColor
+fovCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+
+aimColorFovCircle = Drawing.new("Circle")
+aimColorFovCircle.Visible = false
+aimColorFovCircle.Thickness = 2
+aimColorFovCircle.Radius = aimColorFovRadius
+aimColorFovCircle.Transparency = 1
+aimColorFovCircle.Color = currentTitleColor
+aimColorFovCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+
+aimbotTargetFrame = Instance.new("Frame", ScreenGui)
+aimbotTargetFrame.Size = UDim2.new(0, 200, 0, 40)
+aimbotTargetFrame.Position = UDim2.new(0.5, 0, 0, 40)
+aimbotTargetFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+aimbotTargetFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+aimbotTargetFrame.BackgroundTransparency = 0.5
+aimbotTargetFrame.BorderSizePixel = 0
+aimbotTargetFrame.Visible = false
+aimbotTargetFrame.ZIndex = 50
+local aimbotTargetCorner = Instance.new("UICorner", aimbotTargetFrame)
+aimbotTargetCorner.CornerRadius = UDim.new(0, 12)
+
+aimbotTargetLabel = Instance.new("TextLabel", aimbotTargetFrame)
+aimbotTargetLabel.Size = UDim2.new(1, 0, 1, 0)
+aimbotTargetLabel.BackgroundTransparency = 1
+aimbotTargetLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+aimbotTargetLabel.Font = Enum.Font.GothamBlack
+aimbotTargetLabel.TextSize = 18
+
+-- ====================== NOVO ESP COM BILLBOARDGUI ======================
+local function createESP(player)
+    if player == LocalPlayer or espBillboardObjects[player] then return end
+    local head = player.Character and player.Character:FindFirstChild("Head")
+    if not head then return end
+
+    local billboard = Instance.new("BillboardGui")
+    billboard.Name = "ESP"
+    billboard.Size = UDim2.new(0, 200, 0, 50)
+    billboard.StudsOffset = Vector3.new(0, 1.5, 0)
+    billboard.AlwaysOnTop = true
+    billboard.MaxDistance = 1000
+    billboard.Parent = head
+
+    local nickLabel = Instance.new("TextLabel", billboard)
+    nickLabel.Size = UDim2.new(1, 0, 0.5, 0)
+    nickLabel.Position = UDim2.new(0, 0, 0, 0)
+    nickLabel.BackgroundTransparency = 1
+    nickLabel.Text = player.Name
+    nickLabel.TextColor3 = getTeamColor(player)
+    nickLabel.Font = Enum.Font.GothamBlack
+    nickLabel.TextSize = 14
+    nickLabel.TextStrokeTransparency = 0.5
+    nickLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
+    nickLabel.Visible = espNicksEnabled
+
+    local distanceLabel = Instance.new("TextLabel", billboard)
+    distanceLabel.Size = UDim2.new(1, 0, 0.5, 0)
+    distanceLabel.Position = UDim2.new(0, 0, 0.5, 0)
+    distanceLabel.BackgroundTransparency = 1
+    distanceLabel.Text = ""
+    distanceLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    distanceLabel.Font = Enum.Font.GothamBlack
+    distanceLabel.TextSize = 12
+    distanceLabel.TextStrokeTransparency = 0.5
+    distanceLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
+
+    espBillboardObjects[player] = {gui = billboard, nickLabel = nickLabel, distanceLabel = distanceLabel}
+end
+
+local function removeESP(player)
+    local data = espBillboardObjects[player]
+    if data then pcall(function() data.gui:Destroy() end); espBillboardObjects[player] = nil end
+end
+
+local function clearAllESP()
+    for player, data in pairs(espBillboardObjects) do pcall(function() data.gui:Destroy() end) end
+    espBillboardObjects = {}
+end
+
+local function updateESPTexts()
+    if not espEnabled then return end
+    for player, data in pairs(espBillboardObjects) do
+        local passes = passesFilters(player)
+        local teamOk = not teamCheck or player.Team ~= LocalPlayer.Team
+        local show = passes and teamOk and isPlayerAlive(player)
+        data.gui.Enabled = show
+        if show then
+            local head = player.Character and player.Character:FindFirstChild("Head")
+            if head then
+                local distance = (Camera.CFrame.Position - head.Position).Magnitude
+                data.distanceLabel.Text = espDistanceEnabled and string.format("%.0fm", distance) or ""
+                data.nickLabel.Visible = espNicksEnabled
+                data.distanceLabel.Visible = espDistanceEnabled
+                local fontSize = getFontSizeByDistance(distance)
+                data.nickLabel.TextSize = fontSize
+                data.distanceLabel.TextSize = math.max(8, fontSize - 2)
+                data.nickLabel.TextColor3 = getTeamColor(player)
+            end
+        end
+    end
+end
+
+local function updateAllESP()
+    if not espEnabled then return end
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player == LocalPlayer then continue end
+        if not espBillboardObjects[player] then createESP(player) end
+        if espGlowEnabled then updateGlowForPlayer(player) end
+        if espLifeEnabled then
+            if not lifeObjects[player] and player.Character then updateLifeESP(player) end
+            if lifeObjects[player] and lifeObjects[player].billboard then
+                lifeObjects[player].billboard.Enabled = passesFilters(player) and (not teamCheck or player.Team ~= LocalPlayer.Team) and isPlayerAlive(player)
+                updateLifeVisual(player)
+            end
+        end
+    end
+    for player, _ in pairs(espBillboardObjects) do
+        if not Players:GetPlayerFromCharacter(player.Character) and not Players:GetPlayers()[player] then removeESP(player) end
+    end
+end
+
+local function updateAllGlows()
+    if not espGlowEnabled then return end
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then updateGlowForPlayer(player) end
+    end
+end
+
+local function recreateAllESP()
+    clearAllESP(); clearAllGlow(); clearAllLifeESP()
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            createESP(player)
+            updateGlowForPlayer(player)
+            updateLifeESP(player)
+        end
+    end
+end
+
 -- ====================== FUNÇÕES DE ITENS ======================
 local function localPlayerHasItem()
     local char = LocalPlayer.Character
@@ -1593,6 +1574,56 @@ local function getEquippedTool()
     end
     return nil
 end
+
+-- ====================== CONEXÕES DE JOGADORES ======================
+for _, player in ipairs(Players:GetPlayers()) do
+    if player ~= LocalPlayer then
+        createESP(player); updateGlowForPlayer(player); updateLifeESP(player)
+    end
+end
+
+Players.PlayerAdded:Connect(function(player)
+    task.wait(0.3)
+    if espEnabled then
+        createESP(player); updateGlowForPlayer(player)
+        if espLifeEnabled then updateLifeESP(player) end
+    end
+    player.CharacterAdded:Connect(function()
+        task.wait(0.3)
+        if hitboxEnabled then _expandPlayer(player) end
+        if espEnabled and espLifeEnabled then updateLifeESP(player) end
+        if espEnabled and espGlowEnabled then updateGlowForPlayer(player) end
+        if espEnabled then removeESP(player); createESP(player) end
+    end)
+end)
+
+for _, player in ipairs(Players:GetPlayers()) do
+    if player ~= LocalPlayer then
+        player.CharacterAdded:Connect(function()
+            task.wait(0.3)
+            if hitboxEnabled then _expandPlayer(player) end
+            if espEnabled and espLifeEnabled then updateLifeESP(player) end
+            if espEnabled and espGlowEnabled then updateGlowForPlayer(player) end
+            if espEnabled then removeESP(player); createESP(player) end
+        end)
+    end
+end
+
+Players.PlayerRemoving:Connect(function(player)
+    removeESP(player)
+    if glowObjects[player] then
+        if glowObjects[player].highlight then pcall(function() glowObjects[player].highlight:Destroy() end) end
+        glowObjects[player] = nil
+    end
+    cleanupLifeESP(player)
+    local ch = player.Character
+    if ch then
+        for _, name in ipairs(HITBOX_TARGETS) do
+            local part = ch:FindFirstChild(name)
+            if part then hitboxOriginalSizes[part] = nil end
+        end
+    end
+end)
 
 -- ====================== CRIAÇÃO DOS TOGGLES E SLIDERS ======================
 createToggleButton(ESPTabFrame, "ESP", function() return espEnabled end, function()
@@ -1615,25 +1646,35 @@ createToggleButton(ESPTabFrame, "Verificar Time", function() return teamCheck en
 end)
 createToggleButton(ESPTabFrame, "Verificar Parede", function() return wallCheck end, function() wallCheck = not wallCheck end)
 
-createToggleButton(ExtraScroll, "Anti-AFK", function() return antiAfkEnabled end, function() antiAfkEnabled = not antiAfkEnabled end)
-createToggleButton(ExtraScroll, "TP (Ctrl + Click)", function() return tpEnabled end, function() tpEnabled = not tpEnabled end)
-createToggleButton(ExtraScroll, "Infinite Ammo", function() return infiniteAmmoEnabled end, function() infiniteAmmoEnabled = not infiniteAmmoEnabled end)
-createToggleButton(ExtraScroll, "No Recoil", function() return noRecoilEnabled end, function() noRecoilEnabled = not noRecoilEnabled end)
-createToggleButton(ExtraScroll, "No Clip", function() return noClipEnabled end, function() noClipEnabled = not noClipEnabled end)
-createToggleButton(ExtraScroll, "Auto-Interact (Bancos/Lojas/Portas)", function() return autoInteractEnabled end, function() autoInteractEnabled = not autoInteractEnabled end)
-createSlider(ExtraScroll, "WalkSpeed", 16, 500, walkSpeedValue, function(v) walkSpeedValue = v end)
-createSlider(ExtraScroll, "JumpPower", 50, 500, jumpPowerValue, function(v) jumpPowerValue = v end)
+-- Aba EXTRA
+createToggleButton(ExtraTabFrame, "TP (Ctrl + Click)", function() return tpEnabled end, function() tpEnabled = not tpEnabled end)
+createToggleButton(ExtraTabFrame, "Infinite Ammo", function() return infiniteAmmoEnabled end, function() infiniteAmmoEnabled = not infiniteAmmoEnabled end)
+createToggleButton(ExtraTabFrame, "No Recoil", function() return noRecoilEnabled end, function() noRecoilEnabled = not noRecoilEnabled end)
+createToggleButton(ExtraTabFrame, "Anti-AFK", function() return antiAfkEnabled end, function() antiAfkEnabled = not antiAfkEnabled end)
+createToggleButton(ExtraTabFrame, "Hitbox Expander (Invisível)", function() return hitboxEnabled end, function()
+    hitboxEnabled = not hitboxEnabled
+    if hitboxEnabled then installHooks(); refreshHitboxes() else _restoreHitboxes() end
+end)
+createSlider(ExtraTabFrame, "Hitbox Size (x)", 1, 10, hitboxSize, function(v)
+    hitboxSize = v
+    if hitboxEnabled then refreshHitboxes() end
+end)
 
-createToggleButton(AimbotLeftFrame, "Aimbot", function() return aimbotEnabled end, function() aimbotEnabled = not aimbotEnabled end)
-createToggleButton(AimbotLeftFrame, "Exibir FOV", function() return showFov end, function() showFov = not showFov end)
+-- Aba AIMBOT
+createToggleButton(AimbotLeftFrame, "Aimbot (Camera)", function() return aimbotEnabled end, function() aimbotEnabled = not aimbotEnabled end)
+createToggleButton(AimbotLeftFrame, "Exibir FOV Aimbot", function() return showFov end, function() showFov = not showFov end)
+createToggleButton(AimbotLeftFrame, "Silent Aim (Bypass)", function() return silentAimEnabled end, function()
+    silentAimEnabled = not silentAimEnabled
+    if silentAimEnabled then installHooks() end
+end)
 createSlider(AimbotRightFrame, "FOV Aimbot", 50, 500, fovRadius, function(value)
     fovRadius = value
     if fovCircle then fovCircle.Radius = value end
 end)
-createSlider(AimbotRightFrame, "Suavização Aimbot", 0, 10, smoothingFactor * 10, function(value)
-    smoothingFactor = value / 10
-end)
+createSlider(AimbotRightFrame, "Suavização Aimbot", 0, 10, smoothingFactor * 10, function(value) smoothingFactor = value / 10 end)
+createSlider(AimbotRightFrame, "FOV Silent Aim", 50, 500, silentAimFov, function(value) silentAimFov = value end)
 
+-- Aba AIMCOLOR
 createToggleButton(AimColorLeftFrame, "AimColor", function() return aimColorEnabled end, function() aimColorEnabled = not aimColorEnabled end)
 createToggleButton(AimColorLeftFrame, "Exibir FOV AimColor", function() return showAimColorFov end, function() showAimColorFov = not showAimColorFov end)
 createToggleButton(AimColorLeftFrame, "AimColor Disfarce", function() return aimColorDisfarceEnabled end, function() aimColorDisfarceEnabled = not aimColorDisfarceEnabled end)
@@ -1641,78 +1682,8 @@ createSlider(AimColorRightFrame, "FOV AimColor", 20, 500, aimColorFovRadius, fun
     aimColorFovRadius = value
     if aimColorFovCircle then aimColorFovCircle.Radius = value end
 end)
-createSlider(AimColorRightFrame, "Força AimColor", 5, 100, aimColorStrength * 100, function(value)
-    aimColorStrength = value / 100
-end)
-createSlider(AimColorRightFrame, "Predição AimColor", 0, 500, aimColorPrediction * 1000, function(value)
-    aimColorPrediction = value / 1000
-end)
-
--- ====================== CONEXÕES DE JOGADORES ======================
-for _, player in ipairs(Players:GetPlayers()) do
-    if player ~= LocalPlayer then
-        createESP(player)
-        updateGlowForPlayer(player)
-        updateLifeESP(player)
-    end
-end
-
-Players.PlayerAdded:Connect(function(player)
-    task.wait(0.3)
-    if espEnabled then
-        createESP(player)
-        updateGlowForPlayer(player)
-        if espLifeEnabled then updateLifeESP(player) end
-    end
-    player.CharacterAdded:Connect(function()
-        task.wait(0.3)
-        if espEnabled and espLifeEnabled then updateLifeESP(player) end
-        if espEnabled and espGlowEnabled then updateGlowForPlayer(player) end
-        if espEnabled then
-            removeESP(player)
-            createESP(player)
-        end
-    end)
-end)
-
-for _, player in ipairs(Players:GetPlayers()) do
-    if player ~= LocalPlayer then
-        player.CharacterAdded:Connect(function()
-            task.wait(0.3)
-            if espEnabled and espLifeEnabled then updateLifeESP(player) end
-            if espEnabled and espGlowEnabled then updateGlowForPlayer(player) end
-            if espEnabled then
-                removeESP(player)
-                createESP(player)
-            end
-        end)
-    end
-end
-
-Players.PlayerRemoving:Connect(function(player)
-    removeESP(player)
-    if glowObjects[player] then
-        if glowObjects[player].highlight then pcall(function() glowObjects[player].highlight:Destroy() end) end
-        glowObjects[player] = nil
-    end
-    cleanupLifeESP(player)
-end)
-
--- ====================== LOOP ANTI-AFK (sem instâncias) ======================
-local antiAfkLastJump = 0
-task.spawn(function()
-    while true do
-        task.wait(1)
-        if antiAfkEnabled and (tick() - antiAfkLastJump) >= 30 then
-            local char = LocalPlayer.Character
-            local humanoid = char and char:FindFirstChildOfClass("Humanoid")
-            if humanoid and humanoid.Health > 0 then
-                humanoid.Jump = true
-                antiAfkLastJump = tick()
-            end
-        end
-    end
-end)
+createSlider(AimColorRightFrame, "Força AimColor", 5, 100, aimColorStrength * 100, function(value) aimColorStrength = value / 100 end)
+createSlider(AimColorRightFrame, "Predição AimColor", 0, 500, aimColorPrediction * 1000, function(value) aimColorPrediction = value / 1000 end)
 
 -- ====================== LOOP DE MUNIÇÃO INFINITA ======================
 task.spawn(function()
@@ -1722,214 +1693,12 @@ task.spawn(function()
                 for _, v in ipairs(LocalPlayer.Backpack:GetChildren()) do
                     if v:IsA("Model") then
                         local ammo = v:FindFirstChild("Ammo")
-                        if ammo and ammo:IsA("DoubleConstrainedValue") then
-                            ammo.MinValue = 29
-                        end
+                        if ammo and ammo:IsA("DoubleConstrainedValue") then ammo.MinValue = 29 end
                     end
                 end
             end)
         end
         task.wait(1)
-    end
-end)
-
--- ====================== TELEPORT MENU (MAP BASED) ======================
-local TELEPORT_LOCATIONS = {
-    {Name = "Banco (ATM) 1", Pos = Vector3.new(-392.92, 60.36, 1436.21)},
-    {Name = "Banco (ATM) 2", Pos = Vector3.new(-887.29, 60.46, 856.50)},
-    {Name = "Banco (ATM) 3", Pos = Vector3.new(-1130.09, 60.46, 1103.37)},
-    {Name = "Banco (ATM) 4", Pos = Vector3.new(-341.99, 60.36, 682.07)},
-    {Name = "Banco (ATM) 5", Pos = Vector3.new(-1179.05, 60.46, 849.42)},
-    {Name = "Banco (ATM) 6", Pos = Vector3.new(-1181.89, 60.46, 1475.47)},
-    {Name = "Banco (ATM) 7", Pos = Vector3.new(132.74, 60.57, 2377.57)},
-    {Name = "Posto (Gasolina)", Pos = Vector3.new(-840.44, 70.00, 1842.81)},
-    {Name = "Padaria", Pos = Vector3.new(132.56, 70.22, 2390.25)},
-    {Name = "Refeitório", Pos = Vector3.new(-609.31, 65.44, 1434.54)},
-    {Name = "Loja Civil", Pos = Vector3.new(-824.77, 61.35, 2388.64)},
-    {Name = "Loja Militar 1", Pos = Vector3.new(-1222.64, 61.34, 1538.94)},
-    {Name = "Loja Militar 2", Pos = Vector3.new(-783.51, 61.34, 1212.52)},
-    {Name = "Loja Militar 3", Pos = Vector3.new(-1089.35, 61.34, 1039.91)},
-    {Name = "Loja Militar 4", Pos = Vector3.new(-927.64, 61.34, 919.94)},
-    {Name = "Recrutamento", Pos = Vector3.new(-159.87, 77.33, 1236.07)},
-    {Name = "Bola Misteriosa", Pos = Vector3.new(-267.13, 58.78, 1597.98)},
-    {Name = "Spawn BAC", Pos = Vector3.new(-949.46, 57.68, 913.36)},
-    {Name = "Spawn CIE", Pos = Vector3.new(-1244.45, 57.68, 1533.81)},
-    {Name = "Spawn Civil 1", Pos = Vector3.new(-508.63, 57.84, 2364.01)},
-    {Name = "Spawn Civil 2", Pos = Vector3.new(-140.76, 57.84, 2364.01)},
-    {Name = "Spawn Civil 3", Pos = Vector3.new(478.10, 57.73, 1890.20)},
-    {Name = "Spawn EB", Pos = Vector3.new(-381.91, 61.81, 637.33)},
-    {Name = "Spawn FE", Pos = Vector3.new(-1067.36, 57.68, 1049.52)},
-    {Name = "Spawn GD", Pos = Vector3.new(-356.89, 62.29, 635.59)},
-    {Name = "Spawn OF", Pos = Vector3.new(-304.74, 57.69, 634.33)},
-    {Name = "Spawn PE", Pos = Vector3.new(-1241.93, 57.68, 909.39)},
-}
-
-local TeleportMenu = Instance.new("Frame", ScreenGui)
-TeleportMenu.Size = UDim2.new(0, 280, 0, 460)
-TeleportMenu.Position = UDim2.new(0.5, -140, 0.5, -230)
-TeleportMenu.BackgroundColor3 = COLORS.PRIMARY
-TeleportMenu.BackgroundTransparency = 0.4
-TeleportMenu.BorderSizePixel = 0
-TeleportMenu.Visible = false
-TeleportMenu.ZIndex = 20
-local TeleportMenuCorner = Instance.new("UICorner", TeleportMenu)
-TeleportMenuCorner.CornerRadius = UDim.new(0, 10)
-
-local TeleportTitle = Instance.new("TextLabel", TeleportMenu)
-TeleportTitle.Text = "Teleports (mapa)"
-TeleportTitle.Size = UDim2.new(1, 0, 0, 32)
-TeleportTitle.BackgroundColor3 = currentTitleColor
-TeleportTitle.TextColor3 = Color3.new(1, 1, 1)
-TeleportTitle.Font = Enum.Font.GothamBlack
-TeleportTitle.TextSize = 14
-TeleportTitle.ZIndex = 21
-local TeleportTitleCorner = Instance.new("UICorner", TeleportTitle)
-TeleportTitleCorner.CornerRadius = UDim.new(0, 10)
-
-local TeleportClose = Instance.new("TextButton", TeleportMenu)
-TeleportClose.Size = UDim2.new(0, 24, 0, 24)
-TeleportClose.Position = UDim2.new(1, -28, 0, 4)
-TeleportClose.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-TeleportClose.BackgroundTransparency = 0.5
-TeleportClose.BorderSizePixel = 0
-TeleportClose.Text = "X"
-TeleportClose.TextColor3 = Color3.new(1, 1, 1)
-TeleportClose.Font = Enum.Font.GothamBlack
-TeleportClose.TextSize = 14
-TeleportClose.ZIndex = 22
-local TeleportCloseCorner = Instance.new("UICorner", TeleportClose)
-TeleportCloseCorner.CornerRadius = UDim.new(0, 6)
-TeleportClose.MouseButton1Click:Connect(function()
-    TeleportMenu.Visible = false
-end)
-
-local TeleportList = Instance.new("ScrollingFrame", TeleportMenu)
-TeleportList.Size = UDim2.new(1, -10, 1, -40)
-TeleportList.Position = UDim2.new(0, 5, 0, 36)
-TeleportList.BackgroundTransparency = 1
-TeleportList.BorderSizePixel = 0
-TeleportList.ScrollBarThickness = 4
-TeleportList.ScrollBarImageColor3 = currentTitleColor
-TeleportList.CanvasSize = UDim2.new(0, 0, 0, 0)
-TeleportList.AutomaticCanvasSize = Enum.AutomaticSize.Y
-TeleportList.ScrollingDirection = Enum.ScrollingDirection.Y
-TeleportList.ZIndex = 21
-
-local TeleportListLayout = Instance.new("UIListLayout", TeleportList)
-TeleportListLayout.Padding = UDim.new(0, 4)
-TeleportListLayout.SortOrder = Enum.SortOrder.LayoutOrder
-
-for i, loc in ipairs(TELEPORT_LOCATIONS) do
-    local btn = Instance.new("TextButton", TeleportList)
-    btn.Size = UDim2.new(1, -10, 0, 30)
-    btn.BackgroundColor3 = COLORS.SECONDARY
-    btn.BackgroundTransparency = 0.4
-    btn.BorderSizePixel = 0
-    btn.Text = loc.Name
-    btn.TextColor3 = Color3.new(1, 1, 1)
-    btn.Font = Enum.Font.GothamBlack
-    btn.TextSize = 12
-    btn.LayoutOrder = i
-    btn.ZIndex = 22
-    local corner = Instance.new("UICorner", btn)
-    corner.CornerRadius = UDim.new(0, 6)
-    btn.MouseButton1Click:Connect(function()
-        local char = LocalPlayer.Character
-        if char then
-            local hrp = char:FindFirstChild("HumanoidRootPart")
-            if hrp then
-                pcall(function()
-                    hrp.CFrame = CFrame.new(loc.Pos)
-                end)
-            end
-        end
-        TeleportMenu.Visible = false
-    end)
-end
-
--- Botão Teleports na aba Extra
-createToggleButton(ExtraScroll, "Teleports (Mapa)", function() return TeleportMenu.Visible end, function()
-    TeleportMenu.Visible = not TeleportMenu.Visible
-end)
-
--- Botão Rejoin
-local rejoinBtn = Instance.new("TextButton", ExtraScroll)
-rejoinBtn.Size = UDim2.new(1, 0, 0, 32)
-rejoinBtn.BackgroundColor3 = Color3.fromRGB(180, 0, 0)
-rejoinBtn.BackgroundTransparency = 0.2
-rejoinBtn.BorderSizePixel = 0
-rejoinBtn.Text = "Rejoin Server"
-rejoinBtn.TextColor3 = Color3.new(1, 1, 1)
-rejoinBtn.Font = Enum.Font.GothamBlack
-rejoinBtn.TextSize = 13
-local rejoinCorner = Instance.new("UICorner", rejoinBtn)
-rejoinCorner.CornerRadius = UDim.new(0, 6)
-rejoinBtn.MouseButton1Click:Connect(function()
-    pcall(function()
-        game:GetService("TeleportService"):Teleport(game.PlaceId, LocalPlayer)
-    end)
-end)
-
--- ====================== LOOPS DAS NOVAS FEATURES ======================
-
--- No Clip + WalkSpeed + JumpPower enforcement
-task.spawn(function()
-    while true do
-        task.wait(0.15)
-        local char = LocalPlayer.Character
-        if char then
-            local humanoid = char:FindFirstChildOfClass("Humanoid")
-            if humanoid then
-                if humanoid.WalkSpeed ~= walkSpeedValue then humanoid.WalkSpeed = walkSpeedValue end
-                if humanoid.UseJumpPower ~= true then humanoid.UseJumpPower = true end
-                if humanoid.JumpPower ~= jumpPowerValue then humanoid.JumpPower = jumpPowerValue end
-            end
-            if noClipEnabled then
-                for _, part in ipairs(char:GetDescendants()) do
-                    if part:IsA("BasePart") and part.CanCollide then
-                        part.CanCollide = false
-                    end
-                end
-            end
-        end
-    end
-end)
-
--- Auto-Interact com ProximityPrompts (bancos, lojas, fardas, portas)
-task.spawn(function()
-    while true do
-        task.wait(0.4)
-        if autoInteractEnabled then
-            pcall(function()
-                local char = LocalPlayer.Character
-                if not char then return end
-                local hrp = char:FindFirstChild("HumanoidRootPart")
-                if not hrp then return end
-                local charPos = hrp.Position
-                local now = tick()
-                for _, prompt in ipairs(Workspace:GetDescendants()) do
-                    if prompt:IsA("ProximityPrompt") and prompt.Enabled and prompt.Parent then
-                        local targetPos = nil
-                        local parent = prompt.Parent
-                        if parent:IsA("BasePart") then
-                            targetPos = parent.Position
-                        elseif parent:IsA("Model") then
-                            local pp = parent.PrimaryPart or parent:FindFirstChildWhichIsA("BasePart")
-                            if pp then targetPos = pp.Position end
-                        end
-                        if targetPos then
-                            local maxDist = prompt.MaxActivationDistance or 10
-                            if (charPos - targetPos).Magnitude <= maxDist then
-                                if not promptCooldowns[prompt] or (now - promptCooldowns[prompt]) > 2 then
-                                    promptCooldowns[prompt] = now
-                                    pcall(fireproximityprompt, prompt)
-                                end
-                            end
-                        end
-                    end
-                end
-            end)
-        end
     end
 end)
 
@@ -1958,8 +1727,6 @@ RunService.RenderStepped:Connect(function()
         fovCircle.Color = currentTitleColor
         aimColorFovCircle.Color = currentTitleColor
     end
-
-    updateFPS()
 
     if tick() - espUpdateTimer >= 0.5 then
         espUpdateTimer = tick()
@@ -1999,13 +1766,8 @@ RunService.RenderStepped:Connect(function()
             if localPlayerHasItem() and tick() >= nextFireTime then
                 task.spawn(function()
                     local tool = getEquippedTool()
-                    if tool then
-                        pcall(function() tool:Activate() end)
-                    else
-                        if mouseClickFunc then
-                            mouseClickFunc()
-                        end
-                    end
+                    if tool then pcall(function() tool:Activate() end)
+                    else if mouseClickFunc then mouseClickFunc() end end
                 end)
                 nextFireTime = tick() + 0.1
                 if not noRecoilEnabled and mouseMoveFunc then mouseMoveFunc(0, recoilCompensation) end
@@ -2018,60 +1780,40 @@ RunService.RenderStepped:Connect(function()
         lastAimColorTargetUpdate = 0
     end
 
-    -- ====== ANTI-RECOIL (puxada forte) + AUTO-CLICK ======
     if noRecoilEnabled and mouse1Down and not mouseOverPanel and getEquippedTool() ~= nil then
         local now = tick()
-
-        -- Autoclick (funciona mesmo com AimColor ativo)
         if localPlayerHasItem() and tick() >= noRecoilNextFire then
             task.spawn(function()
                 local tool = getEquippedTool()
-                if tool then
-                    pcall(function() tool:Activate() end)
-                else
-                    if mouseClickFunc then
-                        mouseClickFunc()
-                    end
-                end
+                if tool then pcall(function() tool:Activate() end)
+                else if mouseClickFunc then mouseClickFunc() end end
             end)
             noRecoilNextFire = tick() + 0.1
         end
-
-        -- Padrão de recoil: puxa para baixo (mais forte), sobe um pouco e balança direita/esquerda
         if now >= nextRecoilTime then
             if mouseMoveFunc then
                 local phase = math.floor(now * 20) % 2
-                if phase == 0 then
-                    mouseMoveFunc(1, 0.6)   -- desce mais forte e vai para a direita
-                else
-                    mouseMoveFunc(-1, 0.6)  -- desce mais forte e vai para a esquerda
-                end
+                if phase == 0 then mouseMoveFunc(1, 0.6) else mouseMoveFunc(-1, 0.6) end
             end
             nextRecoilTime = now + 0.05
         end
-
         if now >= nextRecoilReturnTime then
             if mouseMoveFunc then
                 local phase = math.floor(now * 20) % 2
-                if phase == 0 then
-                    mouseMoveFunc(-1, -0.2)  -- sobe um pouco e volta para a esquerda
-                else
-                    mouseMoveFunc(1, -0.2)   -- sobe um pouco e volta para a direita
-                end
+                if phase == 0 then mouseMoveFunc(-1, -0.2) else mouseMoveFunc(1, -0.2) end
             end
             nextRecoilReturnTime = now + 0.15
         end
-
-        -- Ajuste fino da câmera (leve aumento para baixo)
         pcall(function()
-            if Camera then
-                Camera.CFrame = Camera.CFrame * CFrame.Angles(
-                    math.rad(-0.06),
-                    math.rad(0.004),
-                    0
-                )
-            end
+            if Camera then Camera.CFrame = Camera.CFrame * CFrame.Angles(math.rad(-0.06), math.rad(0.004), 0) end
         end)
+    end
+end)
+
+-- Looping de manter hitbox expandida (caso o jogo resete)
+task.spawn(function()
+    while task.wait(2 + math.random() * 2) do
+        if hitboxEnabled then refreshHitboxes() end
     end
 end)
 
